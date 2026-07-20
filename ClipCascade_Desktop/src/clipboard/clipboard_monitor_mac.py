@@ -73,14 +73,24 @@ def is_source_pasteboard_concealed() -> bool:
         return True
 
 
+def _resolve(x):
+    """pyobjus sometimes hands back an unbound ObjcMethod for a zero-arg Obj-C
+    property instead of its value, and does so inconsistently between a plain
+    venv and the PyInstaller bundle: NSPasteboard.types resolves to a value, but
+    in the bundle NSWorkspace.frontmostApplication resolved to a method
+    ("'ObjcMethod' object has no attribute 'bundleIdentifier'"). Normalize —
+    call it when it is still a method, otherwise use it as-is."""
+    return x() if type(x).__name__ == "ObjcMethod" else x
+
+
 def frontmost_app_bundle_id():
-    """Bundle id of the frontmost application, or None if unavailable.
-    NSWorkspace.frontmostApplication and NSRunningApplication.bundleIdentifier
-    are Obj-C properties — under pyobjus they are attributes, not calls."""
-    app = _NSWorkspace.sharedWorkspace().frontmostApplication
+    """Bundle id of the frontmost application, or None if unavailable. The
+    frontmostApplication / bundleIdentifier properties are run through _resolve
+    because pyobjus may surface either as a method in the PyInstaller bundle."""
+    app = _resolve(_NSWorkspace.sharedWorkspace().frontmostApplication)
     if app is None:
         return None
-    bid = app.bundleIdentifier
+    bid = _resolve(app.bundleIdentifier)
     return bid.UTF8String() if bid is not None else None
 
 

@@ -65,19 +65,32 @@ def _mock_general_pasteboard(declared_type_strings):
     return mock_pasteboard
 
 
+class ObjcMethod:
+    """Mimics pyobjus surfacing a zero-arg Obj-C selector as a callable whose
+    type name is 'ObjcMethod' — the PyInstaller-bundle behavior _resolve must
+    normalize. The class name matters: _resolve keys on type(x).__name__."""
+
+    def __init__(self, value):
+        self._value = value
+
+    def __call__(self):
+        return self._value
+
+
 def _mock_workspace(bundle_id):
-    """Mock matching the pyobjus NSWorkspace shape frontmost_app_bundle_id reads:
-    sharedWorkspace().frontmostApplication (attribute) → bundleIdentifier
-    (attribute) → UTF8String(). bundle_id=None models no frontmost app."""
+    """Mock of the pyobjus NSWorkspace shape frontmost_app_bundle_id reads, with
+    frontmostApplication and bundleIdentifier surfaced as ObjcMethod-typed
+    callables — the bundle behavior that broke the first source-app build — so
+    the tests exercise _resolve. bundle_id=None models no frontmost app."""
     mock_ws = MagicMock()
     if bundle_id is None:
-        mock_ws.sharedWorkspace.return_value.frontmostApplication = None
+        mock_ws.sharedWorkspace.return_value.frontmostApplication = ObjcMethod(None)
     else:
         mock_bid = MagicMock()
         mock_bid.UTF8String.return_value = bundle_id
         mock_app = MagicMock()
-        mock_app.bundleIdentifier = mock_bid
-        mock_ws.sharedWorkspace.return_value.frontmostApplication = mock_app
+        mock_app.bundleIdentifier = ObjcMethod(mock_bid)
+        mock_ws.sharedWorkspace.return_value.frontmostApplication = ObjcMethod(mock_app)
     return mock_ws
 
 
@@ -128,6 +141,19 @@ class TestIsSourcePasteboardConcealed(unittest.TestCase):
             side_effect=RuntimeError("pasteboard read failed"),
         ):
             self.assertTrue(monitor.is_source_pasteboard_concealed())
+
+
+class TestResolve(unittest.TestCase):
+    """_resolve normalizes pyobjus's inconsistent property surfacing (value vs
+    unbound ObjcMethod) — the bug that broke the first source-app build."""
+
+    def test_objcmethod_is_called(self):
+        sentinel = object()
+        self.assertIs(monitor._resolve(ObjcMethod(sentinel)), sentinel)
+
+    def test_plain_value_is_passed_through(self):
+        sentinel = object()
+        self.assertIs(monitor._resolve(sentinel), sentinel)
 
 
 class TestIsSourceAppSensitive(unittest.TestCase):
