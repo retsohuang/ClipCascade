@@ -65,6 +65,22 @@ def _mock_general_pasteboard(declared_type_strings):
     return mock_pasteboard
 
 
+def _mock_workspace(bundle_id):
+    """Mock matching the pyobjus NSWorkspace shape frontmost_app_bundle_id reads:
+    sharedWorkspace().frontmostApplication (attribute) → bundleIdentifier
+    (attribute) → UTF8String(). bundle_id=None models no frontmost app."""
+    mock_ws = MagicMock()
+    if bundle_id is None:
+        mock_ws.sharedWorkspace.return_value.frontmostApplication = None
+    else:
+        mock_bid = MagicMock()
+        mock_bid.UTF8String.return_value = bundle_id
+        mock_app = MagicMock()
+        mock_app.bundleIdentifier = mock_bid
+        mock_ws.sharedWorkspace.return_value.frontmostApplication = mock_app
+    return mock_ws
+
+
 class TestIsSourcePasteboardConcealed(unittest.TestCase):
     """Parameterized on the spec's example table (one row per distinct
     'Pasteboard declares' value; the branch column is covered separately in
@@ -114,6 +130,34 @@ class TestIsSourcePasteboardConcealed(unittest.TestCase):
             self.assertTrue(monitor.is_source_pasteboard_concealed())
 
 
+class TestIsSourceAppSensitive(unittest.TestCase):
+    """Task 2.4: skip publishing when the frontmost app is a known sensitive
+    app (1Password/Passwords/Keychain), covering managers that copy without a
+    concealed pasteboard type (1Password 8 on macOS 26)."""
+
+    def _run_with_bundle_id(self, bundle_id):
+        with patch.object(monitor, "_NSWorkspace", _mock_workspace(bundle_id)):
+            return monitor.is_source_app_sensitive()
+
+    def test_onepassword_bundle_id_blocks_publish(self):
+        self.assertTrue(self._run_with_bundle_id("com.1password.1password"))
+
+    def test_passwords_app_bundle_id_blocks_publish(self):
+        self.assertTrue(self._run_with_bundle_id("com.apple.Passwords"))
+
+    def test_non_sensitive_bundle_id_allows_publish(self):
+        self.assertFalse(self._run_with_bundle_id("com.apple.Safari"))
+
+    def test_no_frontmost_app_allows_publish(self):
+        self.assertFalse(self._run_with_bundle_id(None))
+
+    def test_read_error_fails_closed(self):
+        mock_ws = MagicMock()
+        mock_ws.sharedWorkspace.side_effect = RuntimeError("workspace read failed")
+        with patch.object(monitor, "_NSWorkspace", mock_ws):
+            self.assertTrue(monitor.is_source_app_sensitive())
+
+
 class TestRunnerGating(unittest.TestCase):
     """Drives the real _runner() loop with a mocked pasteboard.Pasteboard to
     confirm the guard applies to the text, image, and files branches — not
@@ -143,7 +187,7 @@ class TestRunnerGating(unittest.TestCase):
 
         return _side_effect
 
-    def _drive_runner_once(self, text=None, image_png=None, files=None, concealed=False):
+    def _drive_runner_once(self, text=None, image_png=None, files=None, concealed=False, source_sensitive=False):
         received = []
         monitor._callback_update = lambda type_, content: received.append((type_, content))
 
@@ -160,7 +204,8 @@ class TestRunnerGating(unittest.TestCase):
         # where the discarded-first-poll value above becomes callback-eligible
         # — lands just after the first sleep(0.3) completes.
         with patch("clipboard.clipboard_monitor_mac.pasteboard.Pasteboard") as MockPB, \
-             patch.object(monitor, "is_source_pasteboard_concealed", return_value=concealed):
+             patch.object(monitor, "is_source_pasteboard_concealed", return_value=concealed), \
+             patch.object(monitor, "is_source_app_sensitive", return_value=source_sensitive):
             MockPB.side_effect = [
                 mock_pb_text,
                 mock_pb_image_png,
@@ -204,6 +249,18 @@ class TestRunnerGating(unittest.TestCase):
     def test_non_concealed_files_are_published(self):
         received = self._drive_runner_once(files=("/tmp/a.txt",), concealed=False)
         self.assertIn(("files", ("/tmp/a.txt",)), received)
+
+    def test_sensitive_source_text_is_not_published(self):
+        received = self._drive_runner_once(text="s3cr3t", source_sensitive=True)
+        self.assertEqual(received, [])
+
+    def test_sensitive_source_image_is_not_published(self):
+        received = self._drive_runner_once(image_png=b"\x89PNG", source_sensitive=True)
+        self.assertEqual(received, [])
+
+    def test_sensitive_source_files_are_not_published(self):
+        received = self._drive_runner_once(files=("/tmp/a.txt",), source_sensitive=True)
+        self.assertEqual(received, [])
 
 
 class TestWriteToPasteboardGuard(unittest.TestCase):
