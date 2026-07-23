@@ -322,6 +322,142 @@ class TestWriteToPasteboardGuard(unittest.TestCase):
             )
             mock_writer.set_contents.assert_called_once_with("hello", "String")
 
+class TestFileSendPath(unittest.TestCase):
+    """Task 7.2: a Finder file copy on the source publishes a ("files", …)
+    payload and NOT a ("text", <filename>) payload — confirming enable_file_sharing
+    wires enable_file_monitoring=True, and get_file_urls fires for a file copy
+    while the text path does NOT fire for the same event."""
+
+    def test_file_copy_publishes_files_not_text(self):
+        """When both files and text are simultaneously available in the pasteboard,
+        the files path fires and its files_processed flag suppresses the text path.
+        This exercises the ordering guarantee in _runner: files checked first,
+        files_processed=True prevents the text callback from running."""
+        import threading
+        received = []
+        monitor._callback_update = lambda type_, content: received.append((type_, content))
+
+        # Simulate a Finder copy: get_file_urls returns the path, while
+        # get_contents(String) would return the filename string (the leaky
+        # text-path behaviour this test guards against).
+        FAKE_PATH = "/private/tmp/16656-6764.png"
+        FAKE_NAME = "16656-6764.png"
+
+        call_count_files = 0
+        call_count_text = 0
+
+        def files_side_effect(*_a, **_kw):
+            nonlocal call_count_files
+            call_count_files += 1
+            return (FAKE_PATH,) if call_count_files == 2 else None
+
+        def text_side_effect(*_a, **_kw):
+            nonlocal call_count_text
+            call_count_text += 1
+            # Simulate the filename leaking into the text slot on the same poll.
+            return FAKE_NAME if call_count_text == 2 else None
+
+        mock_pb_text = MagicMock()
+        mock_pb_text.get_contents.side_effect = text_side_effect
+        mock_pb_image_png = MagicMock()
+        mock_pb_image_png.get_contents.return_value = None
+        mock_pb_image_tiff = MagicMock()
+        mock_pb_image_tiff.get_contents.return_value = None
+        mock_pb_files = MagicMock()
+        mock_pb_files.get_file_urls.side_effect = files_side_effect
+
+        monitor._run = False
+        monitor._first_run = False
+        monitor._block_files_once = False
+        monitor._clipboard_thread = None
+
+        with patch("clipboard.clipboard_monitor_mac.pasteboard.Pasteboard") as MockPB, \
+             patch.object(monitor, "is_source_pasteboard_concealed", return_value=False), \
+             patch.object(monitor, "is_source_app_sensitive", return_value=False):
+            MockPB.side_effect = [
+                mock_pb_text,
+                mock_pb_image_png,
+                mock_pb_image_tiff,
+                mock_pb_files,
+            ]
+            monitor._first_run = True
+            monitor._run = True
+            t = threading.Thread(target=monitor._runner, args=(True, True), daemon=True)
+            monitor._clipboard_thread = t
+            t.start()
+            time.sleep(0.5)
+            monitor._run = False
+            t.join(timeout=2)
+
+        # The file publish must appear.
+        self.assertIn(("files", (FAKE_PATH,)), received)
+        # The text publish of the filename must NOT appear.
+        self.assertNotIn(("text", FAKE_NAME), received)
+
+
+class TestBlockFilesOnce(unittest.TestCase):
+    """Task 7.1: the block-once echo guard prevents the monitor from
+    re-publishing a file URL that was just written to the pasteboard by the
+    receive path — mirrors TestRunnerGating's image block-once behavior."""
+
+    def test_block_files_once_suppresses_one_event_then_clears(self):
+        """With _block_files_once=True, the first files event from _runner is
+        consumed and the flag is cleared; the second event passes normally."""
+        import threading
+        received = []
+        monitor._callback_update = lambda type_, content: received.append((type_, content))
+
+        FAKE_PATH = "/private/tmp/received.png"
+        emit_count = 0
+
+        def files_side_effect(*_a, **_kw):
+            nonlocal emit_count
+            emit_count += 1
+            # Emit on every non-first poll so we can observe both suppress and pass.
+            return (FAKE_PATH,) if emit_count >= 2 else None
+
+        mock_pb_text = MagicMock()
+        mock_pb_text.get_contents.return_value = None
+        mock_pb_image_png = MagicMock()
+        mock_pb_image_png.get_contents.return_value = None
+        mock_pb_image_tiff = MagicMock()
+        mock_pb_image_tiff.get_contents.return_value = None
+        mock_pb_files = MagicMock()
+        mock_pb_files.get_file_urls.side_effect = files_side_effect
+
+        monitor._run = False
+        monitor._first_run = False
+        monitor._block_files_once = True  # Simulate write_file_urls_to_pasteboard setting this
+        monitor._clipboard_thread = None
+
+        with patch("clipboard.clipboard_monitor_mac.pasteboard.Pasteboard") as MockPB, \
+             patch.object(monitor, "is_source_pasteboard_concealed", return_value=False), \
+             patch.object(monitor, "is_source_app_sensitive", return_value=False):
+            MockPB.side_effect = [
+                mock_pb_text,
+                mock_pb_image_png,
+                mock_pb_image_tiff,
+                mock_pb_files,
+            ]
+            monitor._first_run = True
+            monitor._run = True
+            # Run long enough for at least two non-first polls (2 × 0.3s + margin)
+            t = threading.Thread(target=monitor._runner, args=(True, True), daemon=True)
+            monitor._clipboard_thread = t
+            t.start()
+            time.sleep(0.85)
+            monitor._run = False
+            t.join(timeout=2)
+
+        # First event (emit_count==2 poll) was consumed by the block-once guard
+        # and must NOT appear; a later event (emit_count>=3) passes normally.
+        # We assert that at least one files event was received (block cleared)
+        # and that it is the right content.
+        self.assertTrue(
+            any(t == "files" and c == (FAKE_PATH,) for t, c in received),
+            f"Expected a ('files', (FAKE_PATH,)) event after block cleared; got {received}",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

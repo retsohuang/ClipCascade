@@ -281,9 +281,41 @@ class ClipboardManager:
                     and isinstance(payload, dict)
                     and len(payload) > 0
                 ):
-                    if self.sys_tray is not None:
-                        self.is_files_download_enabled = True
-                        self.sys_tray.enable_files_download(files=payload)
+                    if PLATFORM == MACOS:
+                        # Materialize received bytes into the local file-download directory
+                        # and write the resulting file URL(s) to NSPasteboard so Cmd+V on
+                        # the receiver yields the actual file — matching the source's
+                        # own Cmd+V result (file parity, task 7.1).
+                        download_dir = os.path.expanduser(
+                            self.config.data.get("default_file_download_location", "")
+                        )
+                        if not download_dir:
+                            logging.warning(
+                                "default_file_download_location not set — skipping "
+                                "file-URL clipboard write; check the client DATA config"
+                            )
+                        else:
+                            os.makedirs(download_dir, exist_ok=True)
+                            materialized = []
+                            for file_name, file_object in payload.items():
+                                dest = os.path.join(download_dir, file_name)
+                                try:
+                                    with open(dest, "wb") as fh:
+                                        fh.write(file_object.read())
+                                    materialized.append(dest)
+                                except Exception as e:
+                                    logging.error(
+                                        f"Failed to materialize received file "
+                                        f"'{file_name}' to '{download_dir}': {e}"
+                                    )
+                            if materialized:
+                                clipboard_monitor.enable_block_files_once()
+                                clipboard_monitor.write_file_urls_to_pasteboard(materialized)
+                    else:
+                        # Non-macOS platforms: fall through to the tray download menu.
+                        if self.sys_tray is not None:
+                            self.is_files_download_enabled = True
+                            self.sys_tray.enable_files_download(files=payload)
 
         except Exception as e:
             logging.error(f"Failed to copy data to clipboard: {e}")

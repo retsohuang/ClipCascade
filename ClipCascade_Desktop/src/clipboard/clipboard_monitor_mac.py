@@ -8,8 +8,11 @@ from pyobjus import autoclass
 from pyobjus.dylib_manager import load_framework
 
 load_framework("/System/Library/Frameworks/AppKit.framework")
+load_framework("/System/Library/Frameworks/Foundation.framework")
 _NSPasteboard = autoclass("NSPasteboard")
 _NSWorkspace = autoclass("NSWorkspace")
+_NSURL = autoclass("NSURL")
+_NSMutableArray = autoclass("NSMutableArray")
 
 # nspasteboard.org convention: a clipboard manager (Raycast's history capture
 # included) must not record an item declaring any of these types. A 1Password
@@ -47,6 +50,7 @@ _callback_update = None
 _run = False
 _first_run = False
 _block_image_once = False
+_block_files_once = False
 _pasteboard_lock = threading.Lock()
 _pb_writer = None
 
@@ -124,8 +128,28 @@ def write_to_pasteboard(data, pb_type, declared_types=None):
         _pb_writer.set_contents(data, pb_type)
 
 
+
+def write_file_urls_to_pasteboard(file_paths):
+    """Write a list of local file-system paths to the general NSPasteboard as
+    file URLs (using NSPasteboard writeObjects:) so Cmd+V on the receiver yields
+    the actual file rather than its name or a download menu.
+
+    Uses pyobjus NSURL and NSMutableArray to build the objects array that
+    NSPasteboard writeObjects: accepts.  Called from clipboard_manager.paste()
+    on the macOS files receive path (task 7.1)."""
+    try:
+        url_array = _NSMutableArray.alloc().init()
+        for path in file_paths:
+            url = _NSURL.fileURLWithPath_(path)
+            url_array.addObject_(url)
+        pb = _NSPasteboard.generalPasteboard()
+        pb.clearContents()
+        pb.writeObjects_(url_array)
+    except Exception as e:
+        logging.error(f"Failed to write file URLs to pasteboard: {e}")
+
 def _runner(enable_image_monitoring=False, enable_file_monitoring=False):
-    global _first_run, _block_image_once
+    global _first_run, _block_image_once, _block_files_once
     try:
         pb_text = pasteboard.Pasteboard()
         if enable_image_monitoring:
@@ -152,8 +176,11 @@ def _runner(enable_image_monitoring=False, enable_file_monitoring=False):
                         and not _first_run
                         and not is_source_pasteboard_concealed() and not is_source_app_sensitive()
                     ):
-                        files_processed = True
-                        _callback_update("files", clipboard_files)
+                        if _block_files_once:
+                            _block_files_once = False
+                        else:
+                            files_processed = True
+                            _callback_update("files", clipboard_files)
 
             # Text
             with _pasteboard_lock:
@@ -232,7 +259,7 @@ def _start(enable_image_monitoring=False, enable_file_monitoring=False):
 
 
 def stop():
-    global _clipboard_thread, _callback_update, _run, _first_run, _block_image_once, _pb_writer
+    global _clipboard_thread, _callback_update, _run, _first_run, _block_image_once, _block_files_once, _pb_writer
     if _clipboard_thread:
         _run = False
         _clipboard_thread.join()  # Wait for the thread to finish
@@ -240,6 +267,7 @@ def stop():
         _clipboard_thread = None
         _callback_update = None
         _block_image_once = False
+        _block_files_once = False
         _pb_writer = None
         logging.info("Clipboard monitor stopped")
 
@@ -254,6 +282,11 @@ def enable_block_image_once():
     global _block_image_once
     _block_image_once = True
 
+
+
+def enable_block_files_once():
+    global _block_files_once
+    _block_files_once = True
 
 def on_update(callback, enable_image_monitoring=False, enable_file_monitoring=False):
     global _callback_update
