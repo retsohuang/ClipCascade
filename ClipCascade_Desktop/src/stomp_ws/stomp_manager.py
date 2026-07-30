@@ -19,12 +19,24 @@ else:
     from gui.tray import TaskbarPanel
 
 
+def _is_rejected_session(error) -> bool:
+    """Classify a lost websocket connection per the design's failure-mode
+    table: True when the server answered the upgrade with a redirect to the
+    login page (session rejected — re-authenticate), False when there was no
+    HTTP response at all (server unreachable — plain retry, unchanged)."""
+    if error is None:
+        return False
+    text = str(error)
+    return "scheme http is invalid" in text or "/login" in text
+
+
 class STOMPManager(WSInterface):
     def __init__(self, config: Config, is_login_phase=True):
         self.config = config
         self.clipboard_manager = ClipboardManager(self.config)
         self.cipher_manager = CipherManager(self.config)
         self.notification_manager = NotificationManager(self.config)
+        self.request_manager = RequestManager(self.config)
         self.sys_tray: TaskbarPanel = None
         self.first_conn_lost = True
         self.is_login_phase = is_login_phase
@@ -62,6 +74,7 @@ class STOMPManager(WSInterface):
                 on_close_callback=self._on_close,
                 sslopt=websocket_sslopt_for_config(self.config),
             )
+            self._wrap_client_error_capture(self.client)
             self.client.connect(
                 timeout=WEBSOCKET_TIMEOUT,
                 connectCallback=lambda _: self.client.subscribe(  # receive event
@@ -103,7 +116,37 @@ class STOMPManager(WSInterface):
                 )
                 self.first_conn_lost = False
             time.sleep(RECONNECT_WS_TIMER)  # seconds
+            last_error = getattr(self.client, "last_error", None) if self.client else None
+            if _is_rejected_session(last_error):
+                self._reauthenticate()
             self.connect()
+
+    @staticmethod
+    def _wrap_client_error_capture(client):
+        """Record the websocket-client error onto the Client instance so
+        _on_close can classify a lost connection, without patching
+        stomp_ws/client.py: wraps the on_error handler Client's own
+        constructor already installed on the underlying WebSocketApp."""
+        client.last_error = None
+        original_on_error = client.ws.on_error
+
+        def _capture(ws_app, error, *args):
+            client.last_error = error
+            original_on_error(ws_app, error, *args)
+
+        client.ws.on_error = _capture
+
+    def _reauthenticate(self):
+        """Refresh the cookie from the stored login digest when the server
+        rejected the session (e.g. after a restart). A refused
+        re-authentication falls through to the existing reconnect below,
+        which retries on the stale cookie and degrades to today's
+        interactive-login-required status quo rather than looping harder."""
+        login_successful, msg, cookie = self.request_manager.login()
+        if login_successful:
+            self.config.data["cookie"] = cookie
+        else:
+            logging.error(f"Re-authentication failed: {msg}")
 
     def send(self, payload: str, payload_type: str = "text"):
         try:

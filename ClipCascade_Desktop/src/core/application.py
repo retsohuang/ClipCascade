@@ -131,13 +131,13 @@ class Application:
         # enable login form
         used_saved_credentials = False
         display_login_success_dialog = False
+        raw_password = None
         if PLATFORM.startswith(LINUX) and LINUX_USE_CLI_UI:
             Echo("═" * 14 + "\n║ LOGIN FORM ║\n" + "═" * 14)
         while True:
             if (
                 self.config.data.get("cookie") is not None
                 and self.config.data["save_password"]
-                and self.config.data["cipher_enabled"] == False
                 and not used_saved_credentials
             ):
                 # Attempt to connect with password when using saved credentials
@@ -182,7 +182,7 @@ class Application:
                 ws_conn_successful, msg = self._get_ws_manager().connect()
                 if ws_conn_successful:
                     self._get_ws_manager().is_login_phase = False
-                    if self.config.data["cipher_enabled"]:
+                    if self.config.data["cipher_enabled"] and not used_saved_credentials:
                         self.config.data["hashed_password"] = (
                             self.cipher_manager.hash_password(raw_password)
                         )

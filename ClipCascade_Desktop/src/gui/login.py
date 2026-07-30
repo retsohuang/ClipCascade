@@ -305,7 +305,7 @@ class LoginForm(tk.Tk):
         # Save Password Locally Checkbox
         save_password_label = ttk.Label(
             self.extra_frame,
-            text="Store Password Locally\n(not recommended; \nonly works if encryption is disabled):",
+            text="Store Password Locally\n(saves a password hash for\nautomatic login):",
         )
         save_password_label.grid(row=2, column=0, padx=(0, 10), pady=5, sticky=tk.W)
         self.save_password_var = tk.BooleanVar(value=self.config.data["save_password"])
@@ -317,9 +317,9 @@ class LoginForm(tk.Tk):
         self.save_password_checkbox.grid(row=2, column=1, padx=10, pady=5, sticky=tk.W)
         self._add_tooltip(
             [save_password_label, self.save_password_checkbox],
-            "Stores your plain password locally for automatic login convenience.\n\n"
-            "Security trade-off: avoid this on shared or untrusted machines.\n"
-            "This only works when encryption is disabled.",
+            "Stores a SHA3-512 hash of your password locally for automatic\n"
+            "login convenience. The plain password is never saved.\n\n"
+            "Security trade-off: avoid this on shared or untrusted machines.",
         )
 
         # Maximum Clipboard Size - Local Limit
