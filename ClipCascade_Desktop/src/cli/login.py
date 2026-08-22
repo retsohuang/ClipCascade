@@ -174,7 +174,7 @@ class LoginForm:
                 self.config.data["default_file_download_location"] = ""
                 break
 
-            if not os.path.isdir(default_file_download_location):
+            if not os.path.isdir(os.path.expanduser(default_file_download_location)):
                 CustomDialog(
                     "Invalid directory path.",
                     msg_type="error",

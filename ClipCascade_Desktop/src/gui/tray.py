@@ -339,9 +339,9 @@ class TaskbarPanel:
         try:
             try:
                 if self.config.data["default_file_download_location"] != "":
-                    target_directory = self.config.data[
-                        "default_file_download_location"
-                    ]
+                    target_directory = os.path.expanduser(
+                        self.config.data["default_file_download_location"]
+                    )
                 else:
                     target_directory = filedialog.askdirectory(
                         title="Select location to Save File(s)",

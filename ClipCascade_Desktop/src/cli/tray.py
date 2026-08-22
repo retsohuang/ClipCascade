@@ -313,7 +313,9 @@ class TaskbarPanel:
     def _on_download(self, files):
         try:
             if self.config.data["default_file_download_location"] != "":
-                target_directory = self.config.data["default_file_download_location"]
+                target_directory = os.path.expanduser(
+                    self.config.data["default_file_download_location"]
+                )
             else:
                 target_directory = input("Enter the location to save file(s): ").strip()
             if not target_directory:

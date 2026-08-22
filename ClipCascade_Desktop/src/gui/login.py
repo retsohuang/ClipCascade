@@ -613,7 +613,7 @@ class LoginForm(tk.Tk):
         if default_file_download_location == "":
             self.config.data["default_file_download_location"] = ""
         else:
-            if not os.path.exists(default_file_download_location):
+            if not os.path.exists(os.path.expanduser(default_file_download_location)):
                 CustomDialog(
                     "Invalid Input\nDefault File Download Location does not exist.",
                     msg_type="error",
