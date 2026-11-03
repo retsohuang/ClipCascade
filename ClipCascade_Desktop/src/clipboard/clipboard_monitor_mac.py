@@ -1,3 +1,4 @@
+import base64
 from io import BytesIO
 import logging
 import threading
@@ -13,6 +14,8 @@ _NSPasteboard = autoclass("NSPasteboard")
 _NSWorkspace = autoclass("NSWorkspace")
 _NSURL = autoclass("NSURL")
 _NSMutableArray = autoclass("NSMutableArray")
+_NSPasteboardItem = autoclass("NSPasteboardItem")
+_NSData = autoclass("NSData")
 
 # nspasteboard.org convention: a clipboard manager (Raycast's history capture
 # included) must not record an item declaring any of these types. A 1Password
@@ -129,22 +132,35 @@ def write_to_pasteboard(data, pb_type, declared_types=None):
 
 
 
-def write_file_urls_to_pasteboard(file_paths):
+def write_file_urls_to_pasteboard(file_paths, png_data_by_path=None):
     """Write a list of local file-system paths to the general NSPasteboard as
     file URLs (using NSPasteboard writeObjects:) so Cmd+V on the receiver yields
     the actual file rather than its name or a download menu.
 
-    Uses pyobjus NSURL and NSMutableArray to build the objects array that
-    NSPasteboard writeObjects: accepts.  Called from clipboard_manager.paste()
-    on the macOS files receive path (task 7.1)."""
+    Each file gets its own NSPasteboardItem. A path present in png_data_by_path
+    also gets public.png data on the same item, so an image-only reader such as
+    Claude Code's Ctrl+V sees the image while Finder paste still gives the file.
+
+    Called from clipboard_manager.paste() on the macOS files receive path."""
+    png_data_by_path = png_data_by_path or {}
     try:
-        url_array = _NSMutableArray.alloc().init()
+        items = _NSMutableArray.alloc().init()
         for path in file_paths:
+            item = _NSPasteboardItem.alloc().init()
             url = _NSURL.fileURLWithPath_(path)
-            url_array.addObject_(url)
+            item.setString_forType_(url.absoluteString, "public.file-url")
+            png = png_data_by_path.get(path)
+            if png is not None:
+                # pyobjus mangles a Python bytes argument to dataWithBytes:length:
+                # (the data arrives zeroed), so the bytes go through base64.
+                ns_data = _NSData.alloc().initWithBase64EncodedString_options_(
+                    base64.b64encode(png).decode("ascii"), 0
+                )
+                item.setData_forType_(ns_data, "public.png")
+            items.addObject_(item)
         pb = _NSPasteboard.generalPasteboard()
         pb.clearContents()
-        pb.writeObjects_(url_array)
+        pb.writeObjects_(items)
     except Exception as e:
         logging.error(f"Failed to write file URLs to pasteboard: {e}")
 

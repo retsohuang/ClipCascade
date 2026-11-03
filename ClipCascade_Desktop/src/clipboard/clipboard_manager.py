@@ -29,6 +29,10 @@ elif PLATFORM.startswith(LINUX):
     from clipboard import clipboard_monitor_linux as clipboard_monitor
     import subprocess
 
+PASTEBOARD_IMAGE_FILE_EXTENSIONS = frozenset(
+    {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+)
+
 
 class ClipboardManager:
     def __init__(self, config: Config):
@@ -297,12 +301,19 @@ class ClipboardManager:
                         else:
                             os.makedirs(download_dir, exist_ok=True)
                             materialized = []
+                            png_data_by_path = {}
                             for file_name, file_object in payload.items():
                                 dest = os.path.join(download_dir, file_name)
                                 try:
+                                    file_bytes = file_object.read()
                                     with open(dest, "wb") as fh:
-                                        fh.write(file_object.read())
+                                        fh.write(file_bytes)
                                     materialized.append(dest)
+                                    png = ClipboardManager.image_file_to_png(
+                                        file_name, file_bytes
+                                    )
+                                    if png is not None:
+                                        png_data_by_path[dest] = png
                                 except Exception as e:
                                     logging.error(
                                         f"Failed to materialize received file "
@@ -310,7 +321,9 @@ class ClipboardManager:
                                     )
                             if materialized:
                                 clipboard_monitor.enable_block_files_once()
-                                clipboard_monitor.write_file_urls_to_pasteboard(materialized)
+                                clipboard_monitor.write_file_urls_to_pasteboard(
+                                    materialized, png_data_by_path
+                                )
                     else:
                         # Non-macOS platforms: fall through to the tray download menu.
                         if self.sys_tray is not None:
@@ -320,6 +333,25 @@ class ClipboardManager:
         except Exception as e:
             logging.error(f"Failed to copy data to clipboard: {e}")
             raise
+
+    @staticmethod
+    def image_file_to_png(file_name: str, file_bytes: bytes) -> bytes | None:
+        """
+        PNG bytes for a received image file, or None when the file is not a
+        .png/.jpg/.jpeg/.gif/.webp or cannot be decoded.
+        """
+        extension = os.path.splitext(file_name)[1].lower()
+        if extension not in PASTEBOARD_IMAGE_FILE_EXTENSIONS:
+            return None
+        if extension == ".png":
+            return file_bytes
+        try:
+            with Image.open(io.BytesIO(file_bytes)) as img, io.BytesIO() as output:
+                img.save(output, format="PNG")
+                return output.getvalue()
+        except Exception as e:
+            logging.error(f"Failed to convert '{file_name}' to PNG: {e}")
+            return None
 
     def stop(self):
         self.reset_files_download()
