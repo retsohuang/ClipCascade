@@ -216,29 +216,11 @@ class Application:
 
     def get_version_update_status(self) -> list:
         """
-        Checks for a new version of the application by comparing the current version
-        with the one available in a remote JSON file.
+        Never checks upstream: this fork has no update feed, so it always reports no update.
 
         Returns:
         list: [bool, str, str, str] - [Is new version available, latest version, current version, release URL]
         """
-        try:
-            response = RequestManager.get(VERSION_URL)
-            response_data = response.json()
-            if PLATFORM == WINDOWS:
-                key = "windows"
-            elif PLATFORM == MACOS:
-                key = "macos"
-            elif PLATFORM.startswith(LINUX):
-                if not LINUX_USE_CLI_UI:
-                    key = "linux_gui"
-                else:
-                    key = "linux_non_gui"
-
-            if response_data[key] != APP_VERSION:
-                return [True, response_data[key], APP_VERSION, RELEASE_URL]
-        except Exception as e:
-            logging.error(f"Error checking for new version: {e}")
         return [False, "", APP_VERSION, RELEASE_URL]
 
     def get_donation_url(self) -> str:

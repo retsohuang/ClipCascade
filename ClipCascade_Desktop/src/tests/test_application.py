@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, patch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.application import Application
+from core.constants import APP_VERSION
 from utils.cipher_manager import CipherManager
 
 
@@ -98,6 +99,17 @@ class TestFreshLoginDigestPersistence(unittest.TestCase):
         expected_digest = CipherManager.string_to_sha3_512_lowercase_hex(self.RAW_PASSWORD)
         self.assertEqual(self.app.config.data["password"], expected_digest)
         self.assertNotEqual(self.app.config.data["password"], self.RAW_PASSWORD)
+
+
+class TestVersionUpdateStatus(unittest.TestCase):
+    def test_makes_no_request_and_reports_no_update(self):
+        app = Application.__new__(Application)
+        with patch("core.application.RequestManager.get") as mock_get:
+            result = app.get_version_update_status()
+
+        self.assertEqual(mock_get.call_count, 0)
+        self.assertFalse(result[0])
+        self.assertEqual(result[2], APP_VERSION)
 
 
 if __name__ == "__main__":

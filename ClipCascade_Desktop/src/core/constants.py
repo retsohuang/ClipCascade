@@ -167,7 +167,7 @@ if PLATFORM.startswith(LINUX):
 if PLATFORM == WINDOWS:
     APP_VERSION = "3.2.0"
 elif PLATFORM == MACOS:
-    APP_VERSION = "3.2.0"
+    APP_VERSION = "3.2.0-retso.1"
 elif PLATFORM.startswith(LINUX):
     if XMODE:
         APP_VERSION = "3.2.0"  # gui version

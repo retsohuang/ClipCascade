@@ -25,4 +25,8 @@ This project uses sdd for spec-driven development. Changes live in `sdd/changes/
 - `/sdd-implement` builds one section of tasks.md at a time in a fresh subagent, then commits and reviews it.
 - Requirements change mid-work? `/sdd-ingest`, then re-run `/sdd-implement`.
 
+## Extra stages (sdd/sdd.yaml)
+
+- `fork-release`: finish.after
+
 <!-- SDD:END -->
