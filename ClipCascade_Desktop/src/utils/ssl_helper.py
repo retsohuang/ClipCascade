@@ -19,7 +19,10 @@ def requests_verify_arg(config) -> Union[bool, str]:
 
 
 def websocket_sslopt_for_config(config) -> Optional[Dict[str, Any]]:
-    """sslopt for websocket_client run_forever; None uses the library/OS default."""
+    """sslopt for websocket_client run_forever; None uses the library/OS default
+    and is always returned for a ws:// URL."""
+    if not config.data["websocket_url"].startswith("wss://"):
+        return None
     path = (config.data.get("ssl_ca_bundle") or "").strip()
     if path:
         if not os.path.isfile(path):
