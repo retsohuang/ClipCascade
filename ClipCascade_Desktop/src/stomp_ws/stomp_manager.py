@@ -44,6 +44,7 @@ class STOMPManager(WSInterface):
         self.is_connected = False
         self.disconnected = False
         self.is_auto_reconnecting = False
+        self.is_reconnect_loop_running = False
 
     def set_tray_ref(self, sys_tray: TaskbarPanel):
         """
@@ -106,8 +107,11 @@ class STOMPManager(WSInterface):
 
     def _on_close(self):
         self.is_connected = False
+        if self.is_login_phase or self.disconnected or self.is_reconnect_loop_running:
+            return
         # Auto Reconnect
-        if not self.is_login_phase and not self.disconnected:
+        self.is_reconnect_loop_running = True
+        try:
             self.is_auto_reconnecting = True
             if self.first_conn_lost:
                 self.notification_manager.notify(
@@ -115,11 +119,20 @@ class STOMPManager(WSInterface):
                     message="Check your internet connection. Retrying...",
                 )
                 self.first_conn_lost = False
-            time.sleep(RECONNECT_WS_TIMER)  # seconds
-            last_error = getattr(self.client, "last_error", None) if self.client else None
-            if _is_rejected_session(last_error):
-                self._reauthenticate()
-            self.connect()
+            while not self.disconnected:
+                time.sleep(RECONNECT_WS_TIMER)  # seconds
+                if self.disconnected:
+                    break
+                last_error = (
+                    getattr(self.client, "last_error", None) if self.client else None
+                )
+                if _is_rejected_session(last_error):
+                    self._reauthenticate()
+                connected, _ = self.connect()
+                if connected:
+                    break
+        finally:
+            self.is_reconnect_loop_running = False
 
     @staticmethod
     def _wrap_client_error_capture(client):
@@ -139,9 +152,9 @@ class STOMPManager(WSInterface):
     def _reauthenticate(self):
         """Refresh the cookie from the stored login digest when the server
         rejected the session (e.g. after a restart). A refused
-        re-authentication falls through to the existing reconnect below,
-        which retries on the stale cookie and degrades to today's
-        interactive-login-required status quo rather than looping harder."""
+        re-authentication still falls through to the reconnect attempt on
+        the stale cookie; the reconnect loop then tries again every
+        RECONNECT_WS_TIMER seconds."""
         login_successful, msg, cookie = self.request_manager.login()
         if login_successful:
             self.config.data["cookie"] = cookie
