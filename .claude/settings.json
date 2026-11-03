@@ -1,0 +1,22 @@
+{
+  "includeGitInstructions": false,
+  "enabledPlugins": {
+    "sdd@sdd": true,
+    "sdd-grill-pane@sdd": true,
+    "mattpocock-skills@mattpocock": true
+  },
+  "extraKnownMarketplaces": {
+    "sdd": {
+      "source": {
+        "source": "github",
+        "repo": "retsohuang/sdd"
+      }
+    },
+    "mattpocock": {
+      "source": {
+        "source": "github",
+        "repo": "mattpocock/skills"
+      }
+    }
+  }
+}
