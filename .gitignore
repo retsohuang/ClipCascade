@@ -2,3 +2,6 @@ private/
 screenshots/
 .DS_Store
 .vscode/
+# sdd and Claude Code (local only)
+.claude/agent-memory/
+sdd/
